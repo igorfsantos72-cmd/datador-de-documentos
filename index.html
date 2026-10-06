@@ -129,6 +129,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
       </div>
       <div class="sec">
         <h2>Campos encontrados</h2>
+        <div class="row">
+          <button class="btn sm" id="allOn" type="button">Marcar todos</button>
+          <button class="btn sm" id="allOff" type="button">Desmarcar todos</button>
+          <span class="hint mono" id="cnt"></span>
+        </div>
         <div class="list" id="list"></div>
         <p class="hint" id="listHint">Desmarque um campo para não escrever nele. Clique em um campo para ajustá-lo.</p>
       </div>
@@ -527,6 +532,10 @@ function redrawAll() {
 const KIND = { d: 'dia', m: 'mês', mext: 'mês por extenso', y4: 'ano', y2: 'ano (2 dígitos)', full: 'data completa' };
 function renderList() {
   const box = $('list'); const all = st.pages.flatMap(p => p.fields);
+  const nOn = all.filter(f => f.on).length;
+  $('cnt').textContent = all.length ? nOn + ' de ' + all.length : '';
+  $('allOn').disabled = !all.length || nOn === all.length;
+  $('allOff').disabled = !all.length || nOn === 0;
   if (!all.length) { box.innerHTML = `<p class="hint">${st.pages.length ? 'Nenhum campo ainda.' : 'Os campos aparecem aqui depois que você enviar um arquivo.'}</p>`; return; }
   box.innerHTML = all.map(f => {
     const what = f.slots.map(s => KIND[s.kind]).join(' · ');
@@ -612,6 +621,9 @@ function init() {
     select(f);
     const p = st.pages[f.page]; const g = p.svg && p.svg.querySelector(`.fld[data-id="${f.id}"]`); if (g) g.scrollIntoView({ block: 'center', behavior: 'smooth' });
   });
+  const setAll = v => { st.pages.forEach(p => p.fields.forEach(f => { f.on = v; })); redrawAll(); };
+  $('allOn').addEventListener('click', () => setAll(true));
+  $('allOff').addEventListener('click', () => setAll(false));
   $('export').addEventListener('click', doExport);
   buildStage(); redrawAll();
   loadSample();
