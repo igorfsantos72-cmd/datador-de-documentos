@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Datador de Documentos</title>
+<meta name="description" content="Encontra campos de data em branco em PDFs e imagens e escreve a data de hoje no lugar exato.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: painel de controles fixo à esquerda, páginas empilhadas à direita; no celular tudo em coluna. */
+:root{
+  --bg:#eef1f5; --surface:#ffffff; --ink:#141a24; --muted:#5a6678; --line:#d5dbe4;
+  --accent:#1d3fbd; --accent-fg:#ffffff; --mark:rgba(29,63,189,.10); --mark-line:#1d3fbd;
+  --off:#8a94a5; --warn:#a4560a; --ok:#0d6b5f; --stage:#dfe4eb; --shadow:0 1px 2px rgba(20,26,36,.10),0 8px 24px rgba(20,26,36,.10);
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1218; --surface:#161b24; --ink:#e7ebf2; --muted:#9aa5b6; --line:#28303c;
+    --accent:#8aa0ff; --accent-fg:#0e1218; --mark:rgba(138,160,255,.14); --mark-line:#8aa0ff;
+    --off:#6c7686; --warn:#f0a25a; --ok:#5cc9b8; --stage:#0a0d12; --shadow:0 1px 2px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.45);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1218; --surface:#161b24; --ink:#e7ebf2; --muted:#9aa5b6; --line:#28303c;
+  --accent:#8aa0ff; --accent-fg:#0e1218; --mark:rgba(138,160,255,.14); --mark-line:#8aa0ff;
+  --off:#6c7686; --warn:#f0a25a; --ok:#5cc9b8; --stage:#0a0d12; --shadow:0 1px 2px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.45);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.5;padding-inline:16px;padding-block:20px 40px}
+h1,h2,h3{margin:0;text-wrap:balance}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1280px;margin-inline:auto;display:flex;flex-direction:column;gap:20px}
+.head{display:flex;flex-direction:column;gap:4px}
+.head h1{font-size:22px;font-weight:600;letter-spacing:-.01em}
+.head p{margin:0;color:var(--muted);max-width:62ch}
+.app{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
+@media (min-width:920px){.app{grid-template-columns:340px minmax(0,1fr)}.panel{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-width:0}
+.sec{padding:16px;display:flex;flex-direction:column;gap:12px;border-bottom:1px solid var(--line)}
+.sec:last-child{border-bottom:0}
+.sec h2{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.drop{display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:14px;border:1.5px dashed var(--line);border-radius:8px;cursor:pointer;background:var(--bg)}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--mark)}
+.drop b{font-weight:600}
+.drop span{color:var(--muted);font-size:12px}
+.drop input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 120px}
+.field label{font-size:12px;color:var(--muted)}
+.inp{width:100%;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.btn{padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--surface);cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+.btn.primary:disabled{opacity:.45;cursor:not-allowed}
+.btn.on{background:var(--mark);border-color:var(--accent);color:var(--accent)}
+.btn.sm{padding:4px 8px;font-size:12px}
+.status{font-size:13px;color:var(--muted);min-height:20px}
+.status.err{color:var(--warn)}
+.status.ok{color:var(--ok)}
+.list{display:flex;flex-direction:column;gap:6px;max-height:300px;overflow:auto}
+.item{display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid var(--line);border-radius:6px;cursor:pointer;min-width:0}
+.item.sel{border-color:var(--accent);background:var(--mark)}
+.item input{margin-top:3px;accent-color:var(--accent)}
+.item .t{display:flex;flex-direction:column;min-width:0;flex:1}
+.item .t b{font-weight:500;font-size:13px;overflow-wrap:anywhere}
+.item .t small{color:var(--muted);font-size:11.5px}
+.tag{font-family:var(--font-mono);font-size:10.5px;padding:1px 5px;border:1px solid var(--line);border-radius:4px;color:var(--muted);white-space:nowrap}
+.hint{font-size:12px;color:var(--muted);margin:0}
+.stage{background:var(--stage);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:16px;align-items:center;min-width:0;min-height:320px}
+.stage .bar{width:100%;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.stage .bar .sp{flex:1}
+.pg{width:100%;max-width:900px;position:relative;box-shadow:var(--shadow);background:#fff;line-height:0}
+.pg img{width:100%;height:auto;display:block}
+.pg svg{position:absolute;inset:0;width:100%;height:100%}
+.pg .lbl{position:absolute;left:0;top:-22px;font:11px var(--font-mono);color:var(--muted);line-height:1}
+.pgw{width:100%;max-width:900px;padding-top:22px}
+.fld rect{fill:var(--mark);stroke:var(--mark-line);stroke-width:1.5;vector-effect:non-scaling-stroke;cursor:pointer}
+.fld.off rect{fill:transparent;stroke:var(--off);stroke-dasharray:4 3}
+.fld.sel rect{stroke-width:2.5}
+.fld text{font-family:Arial,Helvetica,sans-serif;pointer-events:none}
+.addmode svg{cursor:crosshair}
+.empty{margin:auto;max-width:44ch;text-align:left;color:var(--muted);display:flex;flex-direction:column;gap:8px}
+.empty h3{color:var(--ink);font-size:16px}
+.tb{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.mono{font-family:var(--font-mono)}
+@media (prefers-reduced-motion:no-preference){.btn,.drop,.item{transition:border-color .12s,background .12s}}
+</style>
+
+<style>:root{color-scheme:light}body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <h1>Datador de Documentos</h1>
+    <p>Envie um PDF ou uma imagem. O sistema procura os campos de data em branco (como ____/____/______) e escreve a data de hoje exatamente no lugar.</p>
+  </header>
+  <div class="app">
+    <aside class="panel">
+      <div class="sec">
+        <h2>Documento</h2>
+        <label class="drop" id="drop" for="file">
+          <b>Escolher PDF ou imagem</b>
+          <span>ou arraste o arquivo para cá · PDF, JPG, PNG, WEBP</span>
+          <input type="file" id="file" accept="application/pdf,image/png,image/jpeg,image/webp">
+        </label>
+        <div class="status" id="status" role="status"></div>
+      </div>
+      <div class="sec">
+        <h2>Data a escrever</h2>
+        <div class="row">
+          <div class="field"><label for="date">Data</label><input class="inp mono" type="date" id="date"></div>
+          <button class="btn" id="today" type="button">Hoje</button>
+        </div>
+        <div class="row">
+          <div class="field"><label for="color">Cor da caneta</label>
+            <select class="inp" id="color"><option value="#111111">Preta</option><option value="#0a2a9c">Azul</option></select></div>
+        </div>
+        <div class="field"><label for="size">Tamanho do texto <span class="mono" id="sizeV">100%</span></label><input type="range" id="size" min="70" max="140" value="100"></div>
+        <div class="field"><label for="dy">Altura em relação à linha <span class="mono" id="dyV">0</span></label><input type="range" id="dy" min="-12" max="12" value="0"></div>
+      </div>
+      <div class="sec">
+        <h2>Campos encontrados</h2>
+        <div class="list" id="list"></div>
+        <p class="hint" id="listHint">Desmarque um campo para não escrever nele. Clique em um campo para ajustá-lo.</p>
+      </div>
+      <div class="sec">
+        <button class="btn primary" id="export" type="button" disabled>Baixar documento datado</button>
+        <p class="hint">O arquivo é processado no seu navegador e não é enviado a nenhum servidor.</p>
+      </div>
+    </aside>
+    <section class="stage" id="stage" aria-live="polite"></section>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script>
+try { if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; } catch (e) {}
+/* ===== Detecção de campos de data ===== */
+const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const CW = {' ':.278,'/':.278,'.':.278,',':.278,':':.278,';':.278,'i':.222,'l':.222,'j':.222,'t':.278,'f':.278,'I':.278,'(':.333,')':.333,'-':.333,'m':.833,'w':.722,'M':.833,'W':.944,'_':.556};
+function cw(c){ if (CW[c] !== undefined) return CW[c]; if (c >= 'A' && c <= 'Z') return .68; if (c >= '0' && c <= '9') return .556; return .53; }
+
+const U = '(?:_+|\\.{3,}|…+)';
+const RX = [
+  { k: 'slash',  re: new RegExp(`(${U})\\s*[\\/\\\\]\\s*(${U})\\s*[\\/\\\\]\\s*((?:20|19)?\\s*${U})`, 'dgi') },
+  { k: 'dash',   re: /(_+)\s*-\s*(_+)\s*-\s*((?:20|19)?\s*_+)/dgi },
+  { k: 'de',     re: new RegExp(`(${U})\\s*de\\s*(${U})\\s*de\\s*((?:20|19)?\\s*${U})`, 'dgi') },
+  { k: 'single', re: /\b(?:data|date)\s*[:\-–]?\s*(_{4,}|\.{6,})/dgi }
+];
+
+/* Campos a partir da camada de texto do PDF (posição exata de cada sublinhado). */
+function detectTextFields(tc, vp, mul) {
+  const its = [];
+  for (const it of tc.items) {
+    if (!it.str) continue;
+    const t = mul(vp.transform, it.transform);
+    if (Math.abs(t[1]) > 0.1 * Math.abs(t[0])) continue;
+    its.push({ s: it.str, x: t[4], y: t[5], w: it.width * vp.scale, fs: Math.hypot(t[2], t[3]) || Math.abs(t[3]) });
+  }
+  its.sort((a, b) => a.y - b.y || a.x - b.x);
+  const lines = []; let cur = null;
+  for (const it of its) {
+    if (cur && Math.abs(it.y - cur.y) <= Math.max(2, .35 * Math.min(it.fs, cur.items[0].fs))) cur.items.push(it);
+    else { cur = { y: it.y, items: [it] }; lines.push(cur); }
+  }
+  const fields = [];
+  for (const ln of lines) {
+    ln.items.sort((a, b) => a.x - b.x);
+    let txt = '', prevEnd = null; const xs = [], xe = [], fsc = [];
+    for (const it of ln.items) {
+      if (prevEnd !== null && it.x - prevEnd > .25 * it.fs) { txt += ' '; xs.push(prevEnd); xe.push(it.x); fsc.push(it.fs); }
+      const ch = it.s.split(''); const wts = ch.map(cw); const tot = wts.reduce((a, b) => a + b, 0) || 1;
+      let x = it.x;
+      for (let i = 0; i < ch.length; i++) { const w = it.w * wts[i] / tot; txt += ch[i]; xs.push(x); xe.push(x + w); fsc.push(it.fs); x += w; }
+      prevEnd = it.x + it.w;
+    }
+    if (!/[_.…]/.test(txt)) continue;
+    const used = [];
+    for (const { k, re } of RX) {
+      re.lastIndex = 0; let m;
+      while ((m = re.exec(txt))) {
+        const a0 = m.index, b0 = m.index + m[0].length;
+        if (used.some(u => a0 < u[1] && b0 > u[0])) continue;
+        used.push([a0, b0]);
+        const slots = [];
+        if (k === 'single') {
+          const [a, b] = m.indices[1];
+          slots.push({ x0: xs[a], x1: xe[b - 1], kind: 'full' });
+        } else {
+          for (let g = 1; g <= 3; g++) {
+            let [a, b] = m.indices[g]; let pre = false;
+            if (g === 3) { const off = txt.slice(a, b).search(/[_.…]/); if (off > 0) { a += off; pre = true; } }
+            let kind = g === 1 ? 'd' : g === 2 ? (k === 'de' ? 'mext' : 'm') : (pre ? 'y2' : (b - a >= 3 ? 'y4' : 'y2'));
+            slots.push({ x0: xs[a], x1: xe[b - 1], kind });
+          }
+        }
+        const start = m.indices[1][0];
+        const before = txt.slice(Math.max(0, start - 60), start);
+        const birth = /nasc/i.test(before);
+        fields.push({
+          src: 'texto', slots, base: ln.y, fs: fsc[start] || 12,
+          label: txt.slice(Math.max(0, start - 28), start).trim(),
+          on: !birth, note: birth ? 'Parece data de nascimento' : (k === 'single' ? 'Campo único' : '')
+        });
+      }
+    }
+  }
+  return fields;
+}
+
+/* Campos a partir dos pixels: três traços horizontais na mesma linha, separados por "/" ou "de". */
+function detectRaster(data, W, H) {
+  const px = W * H; let sum = 0, n = 0;
+  const lum = o => data[o + 3] < 128 ? 255 : .299 * data[o] + .587 * data[o + 1] + .114 * data[o + 2];
+  for (let i = 0; i < px; i += 7) { sum += lum(i * 4); n++; }
+  const thr = Math.min(165, (sum / n) * .62);
+  const dark = new Uint8Array(px);
+  for (let i = 0; i < px; i++) dark[i] = lum(i * 4) < thr ? 1 : 0;
+
+  const minL = Math.max(12, Math.round(.011 * W)), maxL = Math.round(.22 * W), maxT = Math.max(5, Math.round(.004 * W));
+  let active = []; const done = [];
+  for (let y = 0; y < H; y++) {
+    const row = y * W, runs = []; let x = 0;
+    while (x < W) {
+      if (!dark[row + x]) { x++; continue; }
+      const s = x; let e = x;
+      while (e + 1 < W && (dark[row + e + 1] || (e + 2 < W && dark[row + e + 2]))) e++;
+      const len = e - s + 1;
+      if (len >= minL && len <= maxL) runs.push([s, e]);
+      x = e + 1;
+    }
+    const next = [];
+    for (const r of runs) {
+      let m = null;
+      for (const s of active) {
+        if (s.y1 === y - 1) {
+          const ov = Math.min(s.x1, r[1]) - Math.max(s.x0, r[0]);
+          if (ov >= .6 * Math.min(s.x1 - s.x0 + 1, r[1] - r[0] + 1)) { m = s; break; }
+        }
+      }
+      if (m) { m.x0 = Math.min(m.x0, r[0]); m.x1 = Math.max(m.x1, r[1]); m.y1 = y; next.push(m); }
+      else next.push({ x0: r[0], x1: r[1], y0: y, y1: y });
+    }
+    for (const s of active) if (s.y1 < y) done.push(s);
+    active = next;
+  }
+  for (const s of active) done.push(s);
+  const clear = s => {
+    let bad = 0, tot = 0;
+    for (let x = s.x0 + 1; x < s.x1; x++) {
+      for (let k = 1; k <= 4; k++) {
+        const ya = s.y0 - k, yb = s.y1 + k;
+        if (ya >= 0) { tot++; if (dark[ya * W + x]) bad++; }
+        if (yb < H) { tot++; if (dark[yb * W + x]) bad++; }
+      }
+    }
+    return tot > 0 && bad / tot <= .05;
+  };
+  const segs = done.filter(s => (s.y1 - s.y0 + 1) <= maxT && (s.x1 - s.x0 + 1) <= maxL * 1.15 && clear(s));
+  segs.forEach(s => s.yc = (s.y0 + s.y1) / 2);
+  segs.sort((a, b) => a.yc - b.yc);
+
+  const tol = Math.max(3, .004 * W), clusters = [];
+  for (const s of segs) {
+    const c = clusters[clusters.length - 1];
+    if (c && Math.abs(s.yc - c.ym) <= tol) { c.s.push(s); c.ym = c.s.reduce((a, b) => a + b.yc, 0) / c.s.length; }
+    else clusters.push({ ym: s.yc, s: [s] });
+  }
+
+  function gapInfo(a, b) {
+    const gx0 = a.x1 + 1, gx1 = b.x0 - 1, gw = gx1 - gx0 + 1;
+    if (gw < Math.max(3, .0025 * W) || gw > .1 * W) return null;
+    const yl = Math.round(Math.min(a.y0, b.y0)), maxUp = Math.round(.045 * W);
+    let started = false, miss = 0, rows = 0, minX = 1e9, maxX = -1;
+    for (let y = yl - 1; y >= Math.max(0, yl - maxUp); y--) {
+      let any = false; const row = y * W;
+      for (let x = gx0; x <= gx1; x++) if (dark[row + x]) { any = true; if (x < minX) minX = x; if (x > maxX) maxX = x; }
+      if (any) { started = true; miss = 0; rows++; }
+      else if (started) { if (++miss >= 2) break; }
+      else if (yl - 1 - y > .012 * W) break;
+    }
+    const ext = maxX - minX + 1;
+    if (rows < .0065 * W || ext < .0025 * W || rows >= maxUp) return null;
+    return { rows, ext };
+  }
+
+  const fields = [];
+  for (const c of clusters) {
+    const ss = c.s.sort((a, b) => a.x0 - b.x0);
+    let i = 0;
+    while (i < ss.length - 2) {
+      const a = ss[i], b = ss[i + 1], d = ss[i + 2];
+      const g1 = gapInfo(a, b), g2 = g1 && gapInfo(b, d);
+      const l0 = a.x1 - a.x0 + 1, l1 = b.x1 - b.x0 + 1, l2 = d.x1 - d.x0 + 1;
+      const de = !!(g1 && g2) && (g1.ext >= .014 * W || g2.ext >= .014 * W);
+      const rOk = de ? (l0 / l1 > .12 && l0 / l1 < 3 && l2 / l0 > .5 && l2 / l0 < 4)
+                     : (l0 / l1 > .45 && l0 / l1 < 2.2 && l2 / l0 > .6 && l2 / l0 < 3.5);
+      if (g1 && g2 && rOk) {
+        const fsEst = ((g1.rows + g2.rows) / 2) / (de ? .74 : .8);
+        const fs = Math.min(.04 * W, Math.max(.009 * W, fsEst));
+        const yl = (a.y0 + b.y0 + d.y0) / 3;
+        fields.push({
+          src: 'imagem', base: yl - .08 * fs - 1, fs, label: '', on: true, note: '',
+          slots: [
+            { x0: a.x0, x1: a.x1, kind: 'd' },
+            { x0: b.x0, x1: b.x1, kind: de ? 'mext' : 'm' },
+            { x0: d.x0, x1: d.x1, kind: l2 / l0 >= 1.45 ? 'y4' : 'y2' }
+          ]
+        });
+        i += 3;
+      } else i++;
+    }
+  }
+  return fields;
+}
+
+/* ===== Formatação e posição do texto (igual na tela e no arquivo final) ===== */
+function fmt(kind, d) {
+  const dd = String(d.getDate()).padStart(2, '0'), mm = String(d.getMonth() + 1).padStart(2, '0'), yy = d.getFullYear();
+  switch (kind) {
+    case 'd': return dd; case 'm': return mm; case 'mext': return MESES[d.getMonth()];
+    case 'y4': return String(yy); case 'y2': return String(yy).slice(2);
+    default: return dd + '/' + mm + '/' + yy;
+  }
+}
+let _mctx = null;
+function textRatio(t) {
+  if (!_mctx) { _mctx = document.createElement('canvas').getContext('2d'); _mctx.font = '100px Arial, Helvetica, sans-serif'; }
+  return _mctx.measureText(t).width / 100;
+}
+function layoutField(f, st) {
+  const fs0 = f.fs * st.size * (f.sz || 1);
+  const base = f.base + st.dy * (f.pw / 1500) + (f.oy || 0);
+  return f.slots.map(s => {
+    const text = fmt(s.kind, st.date);
+    const maxw = (s.x1 - s.x0) * .96;
+    let fs = Math.min(fs0, maxw / textRatio(text));
+    fs = Math.max(fs, fs0 * .6);
+    return { text, cx: (s.x0 + s.x1) / 2 + (f.ox || 0), fs, base };
+  });
+}
+function fieldBox(f, lay) {
+  const fs = Math.max(...lay.map(l => l.fs), f.fs);
+  const x0 = Math.min(...f.slots.map(s => s.x0)) + (f.ox || 0), x1 = Math.max(...f.slots.map(s => s.x1)) + (f.ox || 0);
+  const b = lay[0].base;
+  return { x: x0 - .35 * fs, y: b - 1.05 * fs, w: x1 - x0 + .7 * fs, h: 1.45 * fs };
+}
+
+/* ===== Documento de exemplo ===== */
+function drawSample(x, W, H) {
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.fillStyle = '#1a1a1a';
+  x.font = 'bold 30px Arial, Helvetica, sans-serif'; x.fillText('TERMO DE CIÊNCIA E RESPONSABILIDADE', 120, 190);
+  x.font = '24px Arial, Helvetica, sans-serif';
+  const para = ['Declaro que recebi as orientações sobre o uso dos equipamentos de', 'proteção individual e que estou ciente das normas de segurança da', 'empresa, comprometendo-me a cumpri-las integralmente.'];
+  para.forEach((t, i) => x.fillText(t, 120, 270 + i * 40));
+  x.fillText('Local e data: Jaú, ____/____/________', 120, 520);
+  x.fillText('Jaú, ____ de ____________ de 20____', 120, 640);
+  x.fillText('Assinatura do colaborador: ______________________________', 120, 800);
+  x.fillText('Responsável pelo setor: ______________________________', 120, 900);
+}
+
+/* ===== App ===== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const st = { kind: null, name: '', bytes: null, pages: [], date: new Date(), color: '#111111', size: 1, dy: 0, sel: null, add: false, sample: false, imgCanvas: null, mime: '' };
+let FID = 0;
+
+function setStatus(t, cls) { const s = $('status'); s.textContent = t || ''; s.className = 'status' + (cls ? ' ' + cls : ''); }
+const tick = () => new Promise(r => setTimeout(r, 0));
+const toUrl = c => new Promise(r => c.toBlob(b => r(URL.createObjectURL(b)), 'image/jpeg', .88));
+function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function hexRgb(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255); }
+
+function prepField(f, pageIdx, W) {
+  f.id = ++FID; f.page = pageIdx; f.pw = W; f.ox = 0; f.oy = 0; f.sz = 1;
+  if (f.on === undefined) f.on = true;
+  return f;
+}
+function overlaps(a, b) {
+  const box = f => ({ x0: Math.min(...f.slots.map(s => s.x0)), x1: Math.max(...f.slots.map(s => s.x1)), y0: f.base - f.fs, y1: f.base + .3 * f.fs });
+  const p = box(a), q = box(b);
+  return p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1;
+}
+function mergeFields(textF, rasterF) {
+  return textF.concat(rasterF.filter(r => !textF.some(t => overlaps(t, r))));
+}
+
+/* ----- carregar arquivos ----- */
+function resetDoc() {
+  st.pages.forEach(p => p.url && URL.revokeObjectURL(p.url));
+  Object.assign(st, { kind: null, name: '', bytes: null, pages: [], sel: null, add: false, sample: false, imgCanvas: null, mime: '' });
+}
+async function loadPdf(bytes, name) {
+  if (!window.pdfjsLib) throw new Error('A biblioteca de PDF não carregou. Atualize a página e tente de novo.');
+  st.kind = 'pdf'; st.name = name; st.bytes = bytes;
+  let pdf;
+  try { pdf = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false, useSystemFonts: true }).promise; }
+  catch (e) { throw new Error(e && e.name === 'PasswordException' ? 'Este PDF é protegido por senha.' : 'Não foi possível abrir este PDF.'); }
+  for (let i = 1; i <= pdf.numPages; i++) {
+    setStatus(`Analisando página ${i} de ${pdf.numPages}…`);
+    await tick();
+    const page = await pdf.getPage(i);
+    const v1 = page.getViewport({ scale: 1 });
+    const scale = Math.min(2.6, 1600 / v1.width);
+    const vp = page.getViewport({ scale });
+    const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    let tf = [], rf = [];
+    try { tf = detectTextFields(await page.getTextContent(), vp, pdfjsLib.Util.transform); } catch (e) { }
+    try { const id = ctx.getImageData(0, 0, c.width, c.height); rf = detectRaster(id.data, c.width, c.height); } catch (e) { }
+    const fields = mergeFields(tf, rf).sort((a, b) => a.base - b.base).map(f => prepField(f, i - 1, c.width));
+    st.pages.push({ W: c.width, H: c.height, url: await toUrl(c), fields, vp, scale });
+    c.width = c.height = 1;
+  }
+}
+async function loadImg(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch (e) { throw new Error('Não foi possível abrir esta imagem.'); }
+  let s = Math.max(1, Math.min(2, 1600 / bmp.width));
+  const big = Math.max(bmp.width, bmp.height) * s; if (big > 3400) s = 3400 / Math.max(bmp.width, bmp.height);
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  st.kind = 'image'; st.name = file.name; st.imgCanvas = c; st.mime = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+  await finishImage(c);
+}
+async function finishImage(c) {
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const id = ctx.getImageData(0, 0, c.width, c.height);
+  const fields = detectRaster(id.data, c.width, c.height).sort((a, b) => a.base - b.base).map(f => prepField(f, 0, c.width));
+  st.pages = [{ W: c.width, H: c.height, url: await toUrl(c), fields, vp: null, scale: 1 }];
+}
+async function handleFile(file) {
+  if (!file) return;
+  $('export').disabled = true;
+  try {
+    setStatus('Lendo arquivo…'); await tick();
+    resetDoc();
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) await loadPdf(new Uint8Array(await file.arrayBuffer()), file.name);
+    else if (/^image\//.test(file.type) || /\.(png|jpe?g|webp)$/i.test(file.name)) await loadImg(file);
+    else throw new Error('Formato não suportado. Use PDF, JPG, PNG ou WEBP.');
+    afterLoad();
+  } catch (e) {
+    resetDoc(); buildStage(); redrawAll(); setStatus(e.message || 'Erro ao abrir o arquivo.', 'err');
+  }
+}
+function afterLoad() {
+  const n = st.pages.reduce((a, p) => a + p.fields.length, 0);
+  buildStage(); redrawAll();
+  $('export').disabled = st.sample;
+  if (st.sample) setStatus('Exemplo carregado. Envie seu arquivo para começar.');
+  else if (n) setStatus(`${n} campo${n > 1 ? 's' : ''} de data encontrado${n > 1 ? 's' : ''} em ${st.pages.length} página${st.pages.length > 1 ? 's' : ''}. Confira e baixe.`, 'ok');
+  else setStatus('Nenhum campo encontrado automaticamente. Use "Adicionar data manualmente" e clique no local desejado.', 'err');
+}
+
+/* ----- tela ----- */
+function buildStage() {
+  const stg = $('stage'); stg.innerHTML = '';
+  if (!st.pages.length) {
+    stg.innerHTML = '<div class="empty"><h3>Nenhum documento aberto</h3><p>Escolha um PDF ou uma imagem no painel. As páginas aparecem aqui com os campos de data destacados.</p></div>';
+    return;
+  }
+  const bar = document.createElement('div'); bar.className = 'bar';
+  bar.innerHTML = '<button class="btn sm" id="addBtn" type="button">+ Adicionar data manualmente</button><span class="sp"></span><div class="tb" id="tb"></div>';
+  stg.appendChild(bar);
+  st.pages.forEach((p, i) => {
+    const w = document.createElement('div'); w.className = 'pgw';
+    w.innerHTML = `<div class="pg" data-i="${i}"><span class="lbl">Página ${i + 1} de ${st.pages.length}</span><img alt="Página ${i + 1}" src="${p.url}"><svg viewBox="0 0 ${p.W} ${p.H}"></svg></div>`;
+    stg.appendChild(w);
+    const svg = w.querySelector('svg'); p.svg = svg;
+    svg.addEventListener('click', e => {
+      const g = e.target.closest('.fld');
+      if (g) { select(findField(+g.dataset.id)); return; }
+      if (st.add) {
+        const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+        const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+        addManual(i, q.x, q.y); return;
+      }
+      select(null);
+    });
+  });
+  $('addBtn').onclick = () => { st.add = !st.add; stg.classList.toggle('addmode', st.add); $('addBtn').classList.toggle('on', st.add); if (st.add) setStatus('Clique no ponto da página onde a data deve ser escrita.'); };
+  $('tb').onclick = e => { const b = e.target.closest('[data-a]'); if (b) act(b.dataset.a); };
+}
+function findField(id) { for (const p of st.pages) for (const f of p.fields) if (f.id === id) return f; return null; }
+function addManual(pi, x, y) {
+  const p = st.pages[pi], W = p.W;
+  const f = prepField({ src: 'manual', label: 'Adicionado por você', note: '', on: true, base: y, fs: .0185 * W, slots: [{ x0: x - .075 * W, x1: x + .075 * W, kind: 'full' }] }, pi, W);
+  p.fields.push(f); st.add = false; $('stage').classList.remove('addmode'); $('addBtn').classList.remove('on');
+  setStatus('Data adicionada. Use as setas para ajustar a posição.', 'ok');
+  st.sel = f; redrawAll();
+}
+function select(f) { st.sel = f; redrawAll(); if (f) { const it = document.querySelector(`.item[data-id="${f.id}"]`); if (it) it.scrollIntoView({ block: 'nearest' }); } }
+function act(a) {
+  const f = st.sel; if (!f) return; const step = .0015 * f.pw;
+  if (a === 'l') f.ox -= step; else if (a === 'r') f.ox += step; else if (a === 'u') f.oy -= step; else if (a === 'd') f.oy += step;
+  else if (a === 'sm') f.sz *= .92; else if (a === 'lg') f.sz *= 1.08; else if (a === 'tg') f.on = !f.on;
+  else if (a === 'del') { const p = st.pages[f.page]; p.fields = p.fields.filter(x => x !== f); st.sel = null; }
+  redrawAll();
+}
+function redrawAll() {
+  for (const p of st.pages) {
+    if (!p.svg) continue;
+    let h = '';
+    for (const f of p.fields) {
+      const lay = layoutField(f, st), b = fieldBox(f, lay);
+      h += `<g class="fld${f.on ? '' : ' off'}${st.sel === f ? ' sel' : ''}" data-id="${f.id}"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${b.h * .12}"/>`;
+      if (f.on) for (const l of lay) h += `<text x="${l.cx}" y="${l.base}" font-size="${l.fs}" text-anchor="middle" fill="${st.color}">${esc(l.text)}</text>`;
+      h += '</g>';
+    }
+    p.svg.innerHTML = h;
+  }
+  renderList(); renderTb();
+}
+const KIND = { d: 'dia', m: 'mês', mext: 'mês por extenso', y4: 'ano', y2: 'ano (2 dígitos)', full: 'data completa' };
+function renderList() {
+  const box = $('list'); const all = st.pages.flatMap(p => p.fields);
+  if (!all.length) { box.innerHTML = `<p class="hint">${st.pages.length ? 'Nenhum campo ainda.' : 'Os campos aparecem aqui depois que você enviar um arquivo.'}</p>`; return; }
+  box.innerHTML = all.map(f => {
+    const what = f.slots.map(s => KIND[s.kind]).join(' · ');
+    return `<div class="item${st.sel === f ? ' sel' : ''}" data-id="${f.id}"><input type="checkbox" aria-label="Escrever neste campo" ${f.on ? 'checked' : ''}><div class="t"><b>Pág. ${f.page + 1}${f.label ? ' · ' + esc(f.label) : ''}</b><small>${what}${f.note ? ' · ' + esc(f.note) : ''}</small></div><span class="tag">${f.src}</span></div>`;
+  }).join('');
+}
+function renderTb() {
+  const tb = $('tb'); if (!tb) return; const f = st.sel;
+  tb.innerHTML = f
+    ? `<button class="btn sm" data-a="l" aria-label="Mover para a esquerda">←</button><button class="btn sm" data-a="r" aria-label="Mover para a direita">→</button><button class="btn sm" data-a="u" aria-label="Mover para cima">↑</button><button class="btn sm" data-a="d" aria-label="Mover para baixo">↓</button><button class="btn sm" data-a="sm" aria-label="Diminuir texto">A−</button><button class="btn sm" data-a="lg" aria-label="Aumentar texto">A+</button><button class="btn sm" data-a="tg">${f.on ? 'Desativar' : 'Ativar'}</button><button class="btn sm" data-a="del">Remover</button>`
+    : '<span class="hint">Clique em um campo para ajustar posição e tamanho.</span>';
+}
+
+/* ----- exportar ----- */
+async function saveFile(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  return true;
+}
+async function exportPdf() {
+  const { PDFDocument, StandardFonts, rgb, degrees } = PDFLib;
+  const doc = await PDFDocument.load(st.bytes, { ignoreEncryption: true });
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pgs = doc.getPages(), col = rgb(...hexRgb(st.color));
+  st.pages.forEach((p, i) => {
+    const page = pgs[i]; if (!page) return;
+    for (const f of p.fields) {
+      if (!f.on) continue;
+      for (const l of layoutField(f, st)) {
+        const size = l.fs / p.scale, wPdf = font.widthOfTextAtSize(l.text, size);
+        const [x, y] = p.vp.convertToPdfPoint(l.cx - wPdf * p.scale / 2, l.base);
+        page.drawText(l.text, { x, y, size, font, color: col, rotate: degrees(p.vp.rotation || 0) });
+      }
+    }
+  });
+  const out = await doc.save();
+  return new Blob([out], { type: 'application/pdf' });
+}
+async function exportImage() {
+  const src = st.imgCanvas, c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = st.color;
+  for (const f of st.pages[0].fields) {
+    if (!f.on) continue;
+    for (const l of layoutField(f, st)) { ctx.font = `${l.fs}px Arial, Helvetica, sans-serif`; ctx.fillText(l.text, l.cx, l.base); }
+  }
+  return await new Promise(r => c.toBlob(r, st.mime, .95));
+}
+async function doExport() {
+  if (!st.pages.length || st.sample) return;
+  const btn = $('export'); btn.disabled = true;
+  try {
+    setStatus('Gerando arquivo…'); await tick();
+    const base = st.name.replace(/\.[^.]+$/, '');
+    let blob, name;
+    if (st.kind === 'pdf') { blob = await exportPdf(); name = base + '-datado.pdf'; }
+    else { blob = await exportImage(); name = base + '-datado.' + (st.mime === 'image/jpeg' ? 'jpg' : 'png'); }
+    const ok = await saveFile(name, blob);
+    setStatus(ok ? 'Arquivo pronto: ' + name : 'Download cancelado.', ok ? 'ok' : '');
+  } catch (e) { setStatus(e.message || 'Erro ao gerar o arquivo.', 'err'); }
+  btn.disabled = false;
+}
+
+/* ----- controles ----- */
+function setDate(d) { st.date = d; $('date').value = ymd(d); }
+function init() {
+  setDate(new Date());
+  $('date').addEventListener('change', e => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(e.target.value); if (m) { st.date = new Date(+m[1], +m[2] - 1, +m[3]); redrawAll(); } });
+  $('today').addEventListener('click', () => { setDate(new Date()); redrawAll(); });
+  $('color').addEventListener('change', e => { st.color = e.target.value; redrawAll(); });
+  $('size').addEventListener('input', e => { st.size = e.target.value / 100; $('sizeV').textContent = e.target.value + '%'; redrawAll(); });
+  $('dy').addEventListener('input', e => { st.dy = +e.target.value; $('dyV').textContent = e.target.value; redrawAll(); });
+  $('file').addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+  $('list').addEventListener('click', e => {
+    const it = e.target.closest('.item'); if (!it) return; const f = findField(+it.dataset.id); if (!f) return;
+    if (e.target.matches('input')) { f.on = e.target.checked; redrawAll(); return; }
+    select(f);
+    const p = st.pages[f.page]; const g = p.svg && p.svg.querySelector(`.fld[data-id="${f.id}"]`); if (g) g.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
+  $('export').addEventListener('click', doExport);
+  buildStage(); redrawAll();
+  loadSample();
+}
+async function loadSample() {
+  try {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    drawSample(c.getContext('2d', { willReadFrequently: true }), c.width, c.height);
+    resetDoc(); st.kind = 'image'; st.name = 'exemplo.png'; st.sample = true; st.imgCanvas = c; st.mime = 'image/png';
+    await finishImage(c); afterLoad();
+  } catch (e) { }
+}
+init();
+
+</script>
+</body>
+</html>
