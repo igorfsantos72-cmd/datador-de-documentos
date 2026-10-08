@@ -138,7 +138,10 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         <p class="hint" id="listHint">Desmarque um campo para não escrever nele. Clique em um campo para ajustá-lo.</p>
       </div>
       <div class="sec">
-        <button class="btn primary" id="export" type="button" disabled>Baixar documento datado</button>
+        <div class="row">
+          <button class="btn primary" id="export" type="button" disabled>Baixar documento datado</button>
+          <button class="btn" id="print" type="button" disabled hidden>Imprimir</button>
+        </div>
         <p class="hint">O arquivo é processado no seu navegador e não é enviado a nenhum servidor.</p>
       </div>
     </aside>
@@ -146,6 +149,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   </div>
 </div>
 
+<script>window.__standalone = true;</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script>
@@ -449,7 +453,7 @@ async function finishImage(c) {
 }
 async function handleFile(file) {
   if (!file) return;
-  $('export').disabled = true;
+  $('export').disabled = true; $('print').disabled = true;
   try {
     setStatus('Lendo arquivo…'); await tick();
     resetDoc();
@@ -464,7 +468,7 @@ async function handleFile(file) {
 function afterLoad() {
   const n = st.pages.reduce((a, p) => a + p.fields.length, 0);
   buildStage(); redrawAll();
-  $('export').disabled = st.sample;
+  $('export').disabled = st.sample; $('print').disabled = st.sample;
   if (st.sample) setStatus('Exemplo carregado. Envie seu arquivo para começar.');
   else if (n) setStatus(`${n} campo${n > 1 ? 's' : ''} de data encontrado${n > 1 ? 's' : ''} em ${st.pages.length} página${st.pages.length > 1 ? 's' : ''}. Confira e baixe.`, 'ok');
   else setStatus('Nenhum campo encontrado automaticamente. Use "Adicionar data manualmente" e clique no local desejado.', 'err');
@@ -586,6 +590,50 @@ async function exportImage() {
   }
   return await new Promise(r => c.toBlob(r, st.mime, .95));
 }
+async function pageCanvas(p) {
+  const c = document.createElement('canvas'); c.width = p.W; c.height = p.H;
+  const ctx = c.getContext('2d');
+  const img = new Image(); img.src = p.url; await img.decode();
+  ctx.drawImage(img, 0, 0);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = st.color;
+  for (const f of p.fields) {
+    if (!f.on) continue;
+    for (const l of layoutField(f, st)) { ctx.font = `${l.fs}px Arial, Helvetica, sans-serif`; ctx.fillText(l.text, l.cx, l.base); }
+  }
+  return c;
+}
+function pageDims(p) {
+  if (st.kind === 'pdf' && p.vp) return [Math.round(p.vp.width / p.scale), Math.round(p.vp.height / p.scale), 'pt'];
+  return p.H >= p.W ? [210, 297, 'mm'] : [297, 210, 'mm'];
+}
+async function doPrint() {
+  if (!st.pages.length || st.sample) return;
+  const btn = $('print'); btn.disabled = true;
+  const urls = []; let fr = null;
+  const cleanup = () => { if (fr) { fr.remove(); fr = null; } urls.splice(0).forEach(u => URL.revokeObjectURL(u)); };
+  try {
+    setStatus('Preparando impressão…'); await tick();
+    for (const p of st.pages) {
+      const c = await pageCanvas(p);
+      urls.push(await new Promise(r => c.toBlob(b => r(URL.createObjectURL(b)), 'image/jpeg', .92)));
+      c.width = c.height = 1; await tick();
+    }
+    const [w, h, u] = pageDims(st.pages[0]);
+    fr = document.createElement('iframe'); fr.setAttribute('aria-hidden', 'true'); fr.tabIndex = -1;
+    fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(fr);
+    const d = fr.contentDocument;
+    d.open();
+    d.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(st.name.replace(/\.[^.]+$/, '') + '-datado') + '</title><style>@page{size:' + w + u + ' ' + h + u + ';margin:0}html,body{margin:0;padding:0}.p{width:' + w + u + ';height:' + h + u + ';overflow:hidden;break-after:page;page-break-after:always}.p:last-child{break-after:auto;page-break-after:auto}img{width:100%;height:100%;object-fit:contain;display:block}</style></head><body>' + urls.map(x => '<div class="p"><img src="' + x + '" alt=""></div>').join('') + '</body></html>');
+    d.close();
+    await Promise.all([...d.images].map(i => i.decode().catch(() => { })));
+    fr.contentWindow.addEventListener('afterprint', cleanup);
+    setTimeout(cleanup, 600000);
+    setStatus('Janela de impressão aberta.', 'ok');
+    fr.contentWindow.focus(); fr.contentWindow.print();
+  } catch (e) { cleanup(); setStatus('Não foi possível imprimir: ' + (e.message || 'erro'), 'err'); }
+  btn.disabled = false;
+}
 async function doExport() {
   if (!st.pages.length || st.sample) return;
   const btn = $('export'); btn.disabled = true;
@@ -625,6 +673,7 @@ function init() {
   $('allOn').addEventListener('click', () => setAll(true));
   $('allOff').addEventListener('click', () => setAll(false));
   $('export').addEventListener('click', doExport);
+  if (window.__standalone) { $('print').hidden = false; $('print').addEventListener('click', doPrint); }
   buildStage(); redrawAll();
   loadSample();
 }
