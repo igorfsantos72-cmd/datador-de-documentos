@@ -83,7 +83,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .pg svg{position:absolute;inset:0;width:100%;height:100%}
 .pg .lbl{position:absolute;left:0;top:-22px;font:11px var(--font-mono);color:var(--muted);line-height:1}
 .pgw{width:100%;max-width:900px;padding-top:22px}
-.fld rect{fill:var(--mark);stroke:var(--mark-line);stroke-width:1.5;vector-effect:non-scaling-stroke;cursor:pointer}
+.fld rect{fill:var(--mark);stroke:var(--mark-line);stroke-width:1.5;vector-effect:non-scaling-stroke;cursor:grab}
+.dragging,.dragging .fld rect{cursor:grabbing!important}
+.pg svg{touch-action:pan-y}
 .fld.off rect{fill:transparent;stroke:var(--off);stroke-dasharray:4 3}
 .fld.sel rect{stroke-width:2.5}
 .fld text{font-family:Arial,Helvetica,sans-serif;pointer-events:none}
@@ -135,7 +137,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
           <span class="hint mono" id="cnt"></span>
         </div>
         <div class="list" id="list"></div>
-        <p class="hint" id="listHint">Desmarque um campo para não escrever nele. Clique em um campo para ajustá-lo.</p>
+        <p class="hint" id="listHint">Desmarque um campo para não escrever nele. Arraste uma data na página para posicioná-la.</p>
       </div>
       <div class="sec">
         <div class="row">
@@ -382,7 +384,7 @@ function drawSample(x, W, H) {
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const st = { kind: null, name: '', bytes: null, pages: [], date: new Date(), color: '#111111', size: 1, dy: 0, sel: null, add: false, sample: false, imgCanvas: null, mime: '' };
-let FID = 0;
+let FID = 0, drag = null, suppressClick = false;
 
 function setStatus(t, cls) { const s = $('status'); s.textContent = t || ''; s.className = 'status' + (cls ? ' ' + cls : ''); }
 const tick = () => new Promise(r => setTimeout(r, 0));
@@ -490,8 +492,8 @@ function buildStage() {
     stg.appendChild(w);
     const svg = w.querySelector('svg'); p.svg = svg;
     svg.addEventListener('click', e => {
-      const g = e.target.closest('.fld');
-      if (g) { select(findField(+g.dataset.id)); return; }
+      if (suppressClick) return;
+      if (e.target.closest('.fld')) return;
       if (st.add) {
         const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
         const q = pt.matrixTransform(svg.getScreenCTM().inverse());
@@ -499,6 +501,37 @@ function buildStage() {
       }
       select(null);
     });
+    svg.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      const g = e.target.closest('.fld'); if (!g) return;
+      const f = findField(+g.dataset.id), m = svg.getScreenCTM(); if (!f || !m) return;
+      drag = { f, g, id: e.pointerId, x0: e.clientX, y0: e.clientY, ox: f.ox, oy: f.oy, k: m.a, tx: 0, ty: 0, moved: false };
+      try { svg.setPointerCapture(e.pointerId); } catch (_) { }
+      e.preventDefault();
+    });
+    svg.addEventListener('pointermove', e => {
+      if (!drag || drag.id !== e.pointerId) return;
+      const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+      if (!drag.moved) { if (Math.hypot(dx, dy) < 4) return; drag.moved = true; svg.classList.add('dragging'); }
+      drag.tx = dx / drag.k; drag.ty = dy / drag.k;
+      drag.g.setAttribute('transform', 'translate(' + drag.tx + ' ' + drag.ty + ')');
+    });
+    const endDrag = e => {
+      if (!drag || drag.id !== e.pointerId) return;
+      const d = drag; drag = null;
+      svg.classList.remove('dragging');
+      try { svg.releasePointerCapture(e.pointerId); } catch (_) { }
+      suppressClick = true; setTimeout(() => { suppressClick = false; }, 60);
+      if (e.type !== 'pointerup') { redrawAll(); return; }
+      if (d.moved) {
+        const f = d.f, pg = st.pages[f.page], cx = f.slots.map(s => (s.x0 + s.x1) / 2);
+        f.ox = Math.max(-Math.min(...cx), Math.min(pg.W - Math.max(...cx), d.ox + d.tx));
+        f.oy = Math.max(-f.base, Math.min(pg.H - f.base, d.oy + d.ty));
+      }
+      select(d.f);
+    };
+    svg.addEventListener('pointerup', endDrag);
+    svg.addEventListener('pointercancel', endDrag);
   });
   $('addBtn').onclick = () => { st.add = !st.add; stg.classList.toggle('addmode', st.add); $('addBtn').classList.toggle('on', st.add); if (st.add) setStatus('Clique no ponto da página onde a data deve ser escrita.'); };
   $('tb').onclick = e => { const b = e.target.closest('[data-a]'); if (b) act(b.dataset.a); };
@@ -508,10 +541,17 @@ function addManual(pi, x, y) {
   const p = st.pages[pi], W = p.W;
   const f = prepField({ src: 'manual', label: 'Adicionado por você', note: '', on: true, base: y, fs: .0185 * W, slots: [{ x0: x - .075 * W, x1: x + .075 * W, kind: 'full' }] }, pi, W);
   p.fields.push(f); st.add = false; $('stage').classList.remove('addmode'); $('addBtn').classList.remove('on');
-  setStatus('Data adicionada. Use as setas para ajustar a posição.', 'ok');
+  setStatus('Data adicionada. Arraste-a com o mouse até o lugar exato ou use as setas.', 'ok');
   st.sel = f; redrawAll();
 }
-function select(f) { st.sel = f; redrawAll(); if (f) { const it = document.querySelector(`.item[data-id="${f.id}"]`); if (it) it.scrollIntoView({ block: 'nearest' }); } }
+function select(f) {
+  st.sel = f; redrawAll();
+  if (!f) return;
+  const it = document.querySelector(`.item[data-id="${f.id}"]`), box = $('list');
+  if (!it || !box) return;
+  const a = box.getBoundingClientRect(), r = it.getBoundingClientRect();
+  if (r.top < a.top) box.scrollTop -= a.top - r.top; else if (r.bottom > a.bottom) box.scrollTop += r.bottom - a.bottom;
+}
 function act(a) {
   const f = st.sel; if (!f) return; const step = .0015 * f.pw;
   if (a === 'l') f.ox -= step; else if (a === 'r') f.ox += step; else if (a === 'u') f.oy -= step; else if (a === 'd') f.oy += step;
@@ -550,7 +590,7 @@ function renderTb() {
   const tb = $('tb'); if (!tb) return; const f = st.sel;
   tb.innerHTML = f
     ? `<button class="btn sm" data-a="l" aria-label="Mover para a esquerda">←</button><button class="btn sm" data-a="r" aria-label="Mover para a direita">→</button><button class="btn sm" data-a="u" aria-label="Mover para cima">↑</button><button class="btn sm" data-a="d" aria-label="Mover para baixo">↓</button><button class="btn sm" data-a="sm" aria-label="Diminuir texto">A−</button><button class="btn sm" data-a="lg" aria-label="Aumentar texto">A+</button><button class="btn sm" data-a="tg">${f.on ? 'Desativar' : 'Ativar'}</button><button class="btn sm" data-a="del">Remover</button>`
-    : '<span class="hint">Clique em um campo para ajustar posição e tamanho.</span>';
+    : '<span class="hint">Clique em um campo para ajustar. Arraste para mover.</span>';
 }
 
 /* ----- exportar ----- */
