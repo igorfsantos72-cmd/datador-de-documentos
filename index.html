@@ -93,6 +93,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .empty{margin:auto;max-width:44ch;text-align:left;color:var(--muted);display:flex;flex-direction:column;gap:8px}
 .empty h3{color:var(--ink);font-size:16px}
 .tb{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.tb .dl{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+.tb .dl .inp{width:auto;padding:3px 6px;font-size:12px}
+.tb .dl.own{border-color:var(--accent);color:var(--accent)}
 .mono{font-family:var(--font-mono)}
 @media (prefers-reduced-motion:no-preference){.btn,.drop,.item{transition:border-color .12s,background .12s}}
 </style>
@@ -119,9 +122,10 @@ input[type=range]{width:100%;accent-color:var(--accent)}
       <div class="sec">
         <h2>Data a escrever</h2>
         <div class="row">
-          <div class="field"><label for="date">Data</label><input class="inp mono" type="date" id="date"></div>
+          <div class="field"><label for="date">Data geral (todos os campos)</label><input class="inp mono" type="date" id="date"></div>
           <button class="btn" id="today" type="button">Hoje</button>
         </div>
+        <p class="hint">Para mudar a data de só um campo, clique nele na página e use "Data deste campo".</p>
         <div class="row">
           <div class="field"><label for="color">Cor da caneta</label>
             <select class="inp" id="color"><option value="#111111">Preta</option><option value="#0a2a9c">Azul</option></select></div>
@@ -349,11 +353,13 @@ function textRatio(t) {
   if (!_mctx) { _mctx = document.createElement('canvas').getContext('2d'); _mctx.font = '100px Arial, Helvetica, sans-serif'; }
   return _mctx.measureText(t).width / 100;
 }
+/* Cada campo pode ter data própria (f.date); se não tiver, usa a data geral (st.date). */
 function layoutField(f, st) {
+  const date = f.date || st.date;
   const fs0 = f.fs * st.size * (f.sz || 1);
   const base = f.base + st.dy * (f.pw / 1500) + (f.oy || 0);
   return f.slots.map(s => {
-    const text = fmt(s.kind, st.date);
+    const text = fmt(s.kind, date);
     const maxw = (s.x1 - s.x0) * .96;
     let fs = Math.min(fs0, maxw / textRatio(text));
     fs = Math.max(fs, fs0 * .6);
@@ -390,10 +396,11 @@ function setStatus(t, cls) { const s = $('status'); s.textContent = t || ''; s.c
 const tick = () => new Promise(r => setTimeout(r, 0));
 const toUrl = c => new Promise(r => c.toBlob(b => r(URL.createObjectURL(b)), 'image/jpeg', .88));
 function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function dmy(d) { return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear(); }
 function hexRgb(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255); }
 
 function prepField(f, pageIdx, W) {
-  f.id = ++FID; f.page = pageIdx; f.pw = W; f.ox = 0; f.oy = 0; f.sz = 1;
+  f.id = ++FID; f.page = pageIdx; f.pw = W; f.ox = 0; f.oy = 0; f.sz = 1; f.date = null;
   if (f.on === undefined) f.on = true;
   return f;
 }
@@ -535,6 +542,14 @@ function buildStage() {
   });
   $('addBtn').onclick = () => { st.add = !st.add; stg.classList.toggle('addmode', st.add); $('addBtn').classList.toggle('on', st.add); if (st.add) setStatus('Clique no ponto da página onde a data deve ser escrita.'); };
   $('tb').onclick = e => { const b = e.target.closest('[data-a]'); if (b) act(b.dataset.a); };
+  /* Data própria do campo selecionado: altera só ele. */
+  $('tb').onchange = e => {
+    if (!e.target.matches('#fdate')) return;
+    const f = st.sel; if (!f) return;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(e.target.value);
+    f.date = m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; /* campo vazio = volta para a data geral */
+    redrawAll();
+  };
 }
 function findField(id) { for (const p of st.pages) for (const f of p.fields) if (f.id === id) return f; return null; }
 function addManual(pi, x, y) {
@@ -556,6 +571,7 @@ function act(a) {
   const f = st.sel; if (!f) return; const step = .0015 * f.pw;
   if (a === 'l') f.ox -= step; else if (a === 'r') f.ox += step; else if (a === 'u') f.oy -= step; else if (a === 'd') f.oy += step;
   else if (a === 'sm') f.sz *= .92; else if (a === 'lg') f.sz *= 1.08; else if (a === 'tg') f.on = !f.on;
+  else if (a === 'gdate') f.date = null; /* volta a usar a data geral */
   else if (a === 'del') { const p = st.pages[f.page]; p.fields = p.fields.filter(x => x !== f); st.sel = null; }
   redrawAll();
 }
@@ -583,14 +599,15 @@ function renderList() {
   if (!all.length) { box.innerHTML = `<p class="hint">${st.pages.length ? 'Nenhum campo ainda.' : 'Os campos aparecem aqui depois que você enviar um arquivo.'}</p>`; return; }
   box.innerHTML = all.map(f => {
     const what = f.slots.map(s => KIND[s.kind]).join(' · ');
-    return `<div class="item${st.sel === f ? ' sel' : ''}" data-id="${f.id}"><input type="checkbox" aria-label="Escrever neste campo" ${f.on ? 'checked' : ''}><div class="t"><b>Pág. ${f.page + 1}${f.label ? ' · ' + esc(f.label) : ''}</b><small>${what}${f.note ? ' · ' + esc(f.note) : ''}</small></div><span class="tag">${f.src}</span></div>`;
+    const own = f.date ? ' · data própria: ' + dmy(f.date) : '';
+    return `<div class="item${st.sel === f ? ' sel' : ''}" data-id="${f.id}"><input type="checkbox" aria-label="Escrever neste campo" ${f.on ? 'checked' : ''}><div class="t"><b>Pág. ${f.page + 1}${f.label ? ' · ' + esc(f.label) : ''}</b><small>${what}${f.note ? ' · ' + esc(f.note) : ''}${own}</small></div><span class="tag">${f.src}</span></div>`;
   }).join('');
 }
 function renderTb() {
   const tb = $('tb'); if (!tb) return; const f = st.sel;
   tb.innerHTML = f
-    ? `<button class="btn sm" data-a="l" aria-label="Mover para a esquerda">←</button><button class="btn sm" data-a="r" aria-label="Mover para a direita">→</button><button class="btn sm" data-a="u" aria-label="Mover para cima">↑</button><button class="btn sm" data-a="d" aria-label="Mover para baixo">↓</button><button class="btn sm" data-a="sm" aria-label="Diminuir texto">A−</button><button class="btn sm" data-a="lg" aria-label="Aumentar texto">A+</button><button class="btn sm" data-a="tg">${f.on ? 'Desativar' : 'Ativar'}</button><button class="btn sm" data-a="del">Remover</button>`
-    : '<span class="hint">Clique em um campo para ajustar. Arraste para mover.</span>';
+    ? `<button class="btn sm" data-a="l" aria-label="Mover para a esquerda">←</button><button class="btn sm" data-a="r" aria-label="Mover para a direita">→</button><button class="btn sm" data-a="u" aria-label="Mover para cima">↑</button><button class="btn sm" data-a="d" aria-label="Mover para baixo">↓</button><button class="btn sm" data-a="sm" aria-label="Diminuir texto">A−</button><button class="btn sm" data-a="lg" aria-label="Aumentar texto">A+</button><button class="btn sm" data-a="tg">${f.on ? 'Desativar' : 'Ativar'}</button><button class="btn sm" data-a="del">Remover</button><label class="dl${f.date ? ' own' : ''}">Data deste campo <input class="inp mono" type="date" id="fdate" value="${ymd(f.date || st.date)}"></label>${f.date ? '<button class="btn sm" data-a="gdate">Usar data geral</button>' : ''}`
+    : '<span class="hint">Clique em um campo para ajustar (posição, tamanho e data). Arraste para mover.</span>';
 }
 
 /* ----- exportar ----- */
